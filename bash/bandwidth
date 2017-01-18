@@ -1,0 +1,107 @@
+#!/bin/bash
+#writed by pooya.azarpour
+#email: pooya_azarpour@yahoo.com
+
+noEcho="0"
+json="0"
+consulServer="127.0.0.1"
+consulPort="8500"
+consulLocalAddr="127.0.0.1"
+consulLocalPort="8500"
+
+if [ "$1" == "--help" ]; then
+        echo -e "Check bandwidth usage\n\n"
+        echo -e "Usage: $0 [options]"
+        echo -e "options:"
+        echo -e  "   -i\t\t\t\tAdapter interface"
+	echo ""
+	echo -e "   --no-echo\t\t\tNo print result in terminal"
+	echo -e "   --json\t\t\tEcho json format of process information"
+	echo -e "   --consul-token\t\tACL token of consul service"
+	echo -e "   --consul-server\t\tIp addr of consul service (Default: 127.0.0.1)"
+        echo -e "   --consul-port\t\tPort of consul service (Default: 8500)"
+	echo -e "   --consul-local-addr\t\tIp addr of consul local node service (Default: 127.0.0.1)"
+	echo -e "   --consul-local-port\t\tPort of consul local node service (Default: 8500)"
+        echo -e "\n-------------------------------------------------"
+        echo -e "Created by: pooya.azarpour\nEmail: pooya_azarpour@yahoo.com"
+        echo ""
+        exit 0
+fi
+
+for (( i=1; i<=$#; (( i=i+2 )))); do
+        next=$(( i + 1))
+        case "${!i}" in
+	"-i")
+		interface="${!next}"
+		;;
+	"--no-echo")
+		noEcho="1"
+		((i--))
+		;;
+	"--json")
+		json="1"
+		((i--))
+		;;
+	"--consul-token")
+		consulToken="${!next}"
+		;;
+	"--consul-server")
+		consulServer="${!next}"
+		;;
+	"--consul-port")
+		consulPort="${!next}"
+		;;
+	"--consul-local-addr")
+                consulLocalAddr="${!next}"
+                ;;
+        "--consul-local-port")
+                consulLocalPort="${!next}"
+                ;;
+        esac
+done
+
+if [[ -z $interface ]]; then
+	echo "Error) -i must be set"
+	echo -e "\nHelp) Usage: $0 --help"
+	exit 1
+fi
+
+list="$(ifconfig | grep -Po '(?<=)[\w\W]+(?=: flags)' | tr "\n" "|" | sed 's/.$//')"
+interfaceRegex='^('$list')$'
+
+if ! [[ $interface =~ $interfaceRegex ]]; then
+	echo "Error) -i options not match ("$list")"
+	echo -e "\nHelp) Usage: $0 --help"
+	exit 1
+fi
+
+iftop="$(sudo iftop -i "$interface" -t -s 1 2> /dev/null | grep -Po '(?<=rate:)[\w\W]+(?=)' | awk '{print $1}' | tr "\n" " " | awk '{print "{\"tx\": \"" $1 "\", \"rx\": \"" $2 "\", \"total\": \"" $3 "\"}"}')"
+
+# write in consul key/value
+nodeName=`curl -s $consulLocalAddr:$consulLocalPort/v1/agent/self | grep -Po '(?<=Name":")[\w\W]+(?=","ClientAddr)'`
+if [[ -n $consulToken ]]; then
+	save="$(consul kv put -http-addr="$consulServer":"$consulPort" -token="$consulToken" json/"$nodeName"/bandwidth "$iftop")"
+else
+	save="$(consul kv put -http-addr="$consulServer":"$consulPort" json/"$nodeName"/bandwidth "$iftop")"
+fi
+
+if [[ "$noEcho" == "1" ]]; then
+	exit 0
+fi
+
+if [[ "$json" == "1" ]]; then
+	echo "${iftop}"
+	exit 0
+else
+	echo $save
+	echo ""
+fi
+
+echo -n "Total send rate: "
+echo "${iftop}" | grep -Po '(?<={"tx": ")[\w\W]+(?=", "rx":)' | tr -d " "
+echo -n "Total receive rate: "
+echo "${iftop}" | grep -Po '(?<="rx": ")[\w\W]+(?=", "total":)' | tr -d " "
+echo -n "Total send and receive rate: "
+echo "${iftop}" | grep -Po '(?<="total": ")[\w\W]+(?="})' | tr -d " "
+
+exit 0

@@ -1,0 +1,192 @@
+#!/bin/bash
+#writed by pooya.azarpour
+#email: pooya_azarpour@yahoo.com
+
+type="all"
+details="0"
+json="0"
+consulServer="127.0.0.1"
+consulPort="8500"
+consulLocalAddr="127.0.0.1"
+consulLocalPort="8500"
+
+if [ "$1" == "--help" ]; then
+        echo -e "Check process usage\n\n"
+        echo -e "Usage: $0 [options]"
+        echo -e "options:"
+        echo -e "   -c\t\t\t\tLimit process rows"
+	echo -e "   -n\t\t\t\tFilter process by name"
+        echo -e "   -t\t\t\t\tType of output process"
+	echo -e "   List type:"
+	echo -e "   \t-t up\t\t\tSystem uptime"
+	echo -e "   \t-t avg\t\t\tLoad average"
+	echo -e "   \t-t task\t\t\tTask information"
+	echo -e "   \t-t cpu\t\t\tCPU usage (%)"
+	echo -e "   \t-t memf\t\t\tMemory free (Kib)"
+	echo -e "   \t-t memu\t\t\tMemory usage (Kib)"
+	echo -e "   \t-t mem\t\t\tMemory usage (%)"
+	echo -e "   \t-t list\t\t\tList of process"
+	echo ""
+	echo -e "   --details\t\t\tShow details process"
+	echo -e "   --no-echo\t\t\tNo print result in terminal"
+	echo -e "   --json\t\t\tEcho json format of process information"
+	echo -e "   --consul-token\t\tACL token of consul service"
+	echo -e "   --consul-server\t\tIp addr of consul service (Default: 127.0.0.1)"
+        echo -e "   --consul-port\t\tPort of consul service (Default: 8500)"
+	echo -e "   --consul-local-addr\t\tIp addr of consul local node service (Default: 127.0.0.1)"
+        echo -e "   --consul-local-port\t\tPort of consul local node service (Default: 8500)"
+        echo -e "\n-------------------------------------------------"
+        echo -e "Created by: pooya.azarpour\nEmail: pooya_azarpour@yahoo.com"
+        echo ""
+        exit 0
+fi
+
+for (( i=1; i<=$#; (( i=i+2 )))); do
+        next=$(( i + 1))
+        case "${!i}" in
+        "-c")
+                count="${!next}"
+                ;;
+	"-t")
+		type="${!next}"
+		;;
+	"-n")
+		name="${!next}"
+		;;
+	"--details")
+		details="1"
+		((i--))
+		;;
+	"--no-echo")
+		noEcho="1"
+		((i--))
+		;;
+	"--json")
+		json="1"
+		((i--))
+		;;
+	"--consul-token")
+		consulToken="${!next}"
+		;;
+	"--consul-server")
+		consulServer="${!next}"
+		;;
+	"--consul-port")
+		consulPort="${!next}"
+		;;
+	"--consul-local-addr")
+                consulLocalAddr="${!next}"
+                ;;
+        "--consul-local-port")
+                consulLocalPort="${!next}"
+                ;;
+        esac
+done
+
+cpu=`{ grep 'cpu ' /proc/stat 4<&- | { sleep 1 && grep 'cpu ' /proc/stat 3<&- | cat /dev/fd/3 -; } 3<&0 <&4 4<&-; } 4<&0 | awk -v RS="" '{print ($13-$2+$15-$4)*100/($13-$2+$15-$4+$16-$5)}'`
+result="$(top -b -n 2 | sed -n '1,5p' | sed "s/up[a-zA-Z0-9_ ,]*\(min\|:[0-9]*\),/up 0 min,/" | tr "\n" " " | awk -v cpu="$cpu" '{print "{\"up\": \"" $3 "\", \"avg\": \"" $11 $12 $13 "\", \"task\": {\"total\": " $15 ", \"run\": " $17 "}, \"cpu\": " cpu ", \"memt\": " $45 ", \"memf\": " $47 ", \"memu\": " $49 ", \"mem\": " $49 * 100 / $45 "}"}')"
+
+#cpu="$(top -b -n 1 | sed -n '8,20p' | awk '$9 >= 0.5 {count++;sum+=$9} END {print sum}')"
+#mem="$(top -b -n 1 | sed -n '4p' | tr " " " " | awk '{print $8 * 100 / $4}')"
+#taskTotal="$(top -b -n 1 | sed -n '2p' | tr " " " " | awk '{print $2}')"
+#taskRun="$(top -b -n 1 | sed -n '2p' | tr " " " " | awk '{print $4}')"	
+
+#result="{cpu: "$cpu", mem: "$mem", task: {total: "$taskTotal", run: "$taskRun"}}"
+
+# write in consul key/value
+nodeName=`curl -s $consulLocalAddr:$consulLocalPort/v1/agent/self | grep -Po '(?<=Name":")[\w\W]+(?=","ClientAddr)'`
+if [[ -n $consulToken ]]; then
+	save="$(consul kv put -http-addr="$consulServer":"$consulPort" -token="$consulToken" json/"$nodeName"/process "$result")"
+else
+	save="$(consul kv put -http-addr="$consulServer":"$consulPort" json/"$nodeName"/process "$result")"
+fi
+
+if [[ "$noEcho" == "1" ]]; then
+        exit 0
+fi
+
+if [[ "$json" == "1" ]]; then
+	echo $result
+	exit 0
+else
+	echo $save
+	echo ""
+fi
+
+numericRegex='^[0-9]+$'
+typeRegex='^(up|avg|task|cpu|memf|memu|mem|list|all)$'
+
+if [[ -n $count ]] && ! [[ $count =~ $numericRegex ]]; then
+	echo "Error) -c options not a number"
+        echo -e "\nHelp) Usage: $0 --help"
+	exit 1
+fi
+
+if ! [[ $type =~ $typeRegex ]]; then
+        echo "Error) -t options not match (up|avg|task|cput|memf|memu|mem|list)"
+        echo -e "\nHelp) Usage: $0 --help"
+        exit 1
+fi
+
+if [[ -n $count ]]; then
+	top="$(top -b -n 1 | sed -n '1,'"$((count + 7))"'p')"
+else
+	top="$(top -b -n 1)"
+fi
+
+case "${type}" in
+	"up")
+		echo -n "Uptime: "
+#		echo "${top}" | sed -n '1p' | grep -Po 'top - \K[0-9\:]+'
+		echo "${result}" | grep -Po '(?<={"up": ")[\w\W]+(?=", "avg":)' | tr -d " "		
+		;;
+	"avg")
+		echo -n "Load average: "
+#		echo "${top}" | sed -n '1p' | grep -Po 'load average: \K[\w\W]+'
+		echo "${result}" | grep -Po '(?<="avg": ")[\w\W]+(?=", "task":)' | tr -d " "
+		;;
+	"task")
+		echo -n "Task: "
+#		echo "${top}" | sed -n '2p'
+		echo "${result}" | grep -Po '(?<="task": {)[\w\W]+(?=}, "cpu":)' | tr -d " "
+		;;
+	"cpu")
+		echo -n "Cpu(%): " $cpu
+#		echo "${top}" | sed -n '8,20p' | awk '$9 != 0 {count++;sum+=$9} END {print sum}'
+		;;
+	"memf")
+		echo -n "Free Memory(KB): "
+#		echo "${top}" | sed -n '4p' | tr " " "\n" | sed -n '8p'
+		echo "${result}" | grep -Po '(?<="memf":)[\w\W]+(?=, "memu":)' | tr -d " "
+		;;
+	"memu")
+                echo -n "Used Memory(KB): "
+#		echo "${top}" | sed -n '4p' | tr " " "\n" | sed -n '12p'
+		echo "${result}" | grep -Po '(?<="memu":)[\w\W]+(?=, "mem":)' | tr -d " "
+                ;;
+	"mem")
+                echo -n "Memory(%): "
+#		echo "${top}" | sed -n '4p' | tr " " " " | awk '{print $10 * 100 / $4}'
+		echo "${result}" | grep -Po '(?<="mem":)[\w\W]+(?=})' | tr -d " "
+                ;;
+	"list")
+		echo "List of process: "
+		if [[ -n $name ]]; then
+			if [[ "$details" == "1" ]]; then
+				echo "${top}" | sed -n '1,6p'
+			fi
+#			if [[ -n $count ]]; then
+#				echo "$(top -b -n 1 | sed | sed -n '1,'"$((count + 7))"'p')" echo "${top}" | grep $name | sed -n '7,/end/p' | sed -n '1,'"$((count+1))"'p'
+#			else
+				echo "${top}" | sed -n '7p'
+				echo "${top}" | grep $name
+#			fi
+		else
+			echo "${top}"
+		fi
+		;;
+	"all")
+		echo "${top}"
+		;; 
+esac 
+exit 0

@@ -1,0 +1,13 @@
+{
+    "services": [
+	{
+	    "name": "nodejs",
+            "tags": ["Node", "http", "https"],
+            "token": "760da679-57e2-4747-92ba-6ce48f265c78",
+            "check": {
+                "script": "curl 192.168.167.102:80 > /dev/null 2>&1",
+                "interval": "10s"
+            }
+         }
+    ]
+}

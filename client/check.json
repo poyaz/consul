@@ -1,0 +1,22 @@
+{
+  "checks": [
+    {
+       "id": "connections",
+       "name": "Count of client join",
+       "script": "sh /home/consul/connections -i enp0s8 --consul-token 760da679-57e2-4747-92ba-6ce48f265c78 --consul-server 192.168.167.2",
+       "interval": "6s"
+    },
+    {
+       "id": "process",
+       "name": "process usage",
+       "script": "sh /home/consul/process -t list -n node -c 10 --details --consul-token 760da679-57e2-4747-92ba-6ce48f265c78 --consul-server 192.168.167.2",
+       "interval": "10s"
+    },
+    {
+       "id": "bandwidth",
+       "name": "bandwidth usage",
+       "script": "sh /home/consul/bandwidth -i enp0s8 --consul-token 760da679-57e2-4747-92ba-6ce48f265c78 --consul-server 192.168.167.2",
+       "interval": "5s"
+    }
+  ]
+}

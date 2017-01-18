@@ -1,0 +1,141 @@
+#!/bin/bash
+#writed by pooya.azarpour
+#email: pooya_azarpour@yahoo.com
+
+interface=""
+version="v4"
+port="80"
+noEcho="0"
+json="0"
+consulServer="127.0.0.1"
+consulPort="8500"
+consulLocalAddr="127.0.0.1"
+consulLocalPort="8500"
+
+if [ "$1" == "--help" ]; then
+	echo -e "Check count of client join to server\n\n"
+	echo -e "Usage: $0 [options]"
+	echo -e "options:"
+	echo -e "   -i\t\t\t\tAdapter interface"
+	echo -e "   -v\t\t\t\tVersion of ip (v4 for ipv4, v6 for ipv6)"
+	echo -e "   -p\t\t\t\tPort of service to listening (Default: 80)"
+	echo ""
+	echo -e "   --no-echo\t\t\tNo print result in terminal"
+	echo -e "   --json\t\t\tEcho json format of process information"
+	echo -e "   --consul-token\t\tACL token of consul service"
+	echo -e "   --consul-server\t\tIp addr of consul service (Default: 127.0.0.1)"
+	echo -e "   --consul-port\t\tPort of consul service (Default: 8500)"
+	echo -e "   --consul-local-addr\t\tIp addr of consul local node service (Default: 127.0.0.1)"
+	echo -e "   --consul-local-port\t\tPort of consul local node service (Default: 8500)"
+	echo -e "\n-------------------------------------------------"
+	echo -e "Created by: pooya.azarpour\nEmail: pooya_azarpour@yahoo.com"
+	echo ""
+	exit 0
+fi
+
+for (( i=1; i<=$#; (( i=i+2 )))); do
+	next=$(( i + 1))
+	case "${!i}" in
+	"-i")
+		interface="${!next}"
+		;;
+	"-v")
+		version="${!next}"
+		;;
+	"-p")
+		port="${!next}"
+		;;
+	"--no-echo")
+		noEcho="1"
+		((i--))
+		;;
+	"--json")
+		json="1"
+		((i--))
+		;;
+	 "--consul-token")
+                consulToken="${!next}"
+                ;;
+	"--consul-server")
+		consulServer="${!next}"
+		;;
+	"--consul-port")
+		consulPort="${!next}"
+		;;
+	"--consul-local-addr")
+		consulLocalAddr="${!next}"
+		;;
+	"--consul-local-port")
+		consulLocalPort="${!next}"
+		;;
+	esac
+done
+
+list="$(ifconfig | grep -Po '(?<=)\K[\w\W]+(?=: flags)' | tr "\n" "|" | sed 's/.$//')"
+interfaceRegex='^('$list')$'
+
+if [[ -z $interface ]]; then
+	echo "Error) Usage: $0 -i \"interface-name\""
+	echo -e "\nHelp) Usage: $0 --help"
+	exit 1
+elif ! [[ $interface =~ $interfaceRegex ]]; then
+        echo "Error) -i options not match ("$list")"
+        echo -e "\nHelp) Usage: $0 --help"
+        exit 1
+fi
+
+if [[ "$version" != "v4" ]] && [[ "$version" != "v6" ]]; then
+	echo "Error) -v must be \"v4\" or \"v6\""
+	echo -e "\nHelp) Usage: $0 --help"
+	exit 1
+fi
+
+if [ "$version" == "v4" ]; then
+	ip=`ifconfig | grep -A 7 $interface | tr -s [:space:] | grep -Po 'inet \K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'`
+else
+	ip=`ifconfig | grep -A 7 $interface | tr -s [:space:] | grep -Po 'inet6 \K[a-z\:0-9]+'`
+fi
+
+clients=`netstat -tn 2>/dev/null | grep :$port | awk '{print $5}' | cut -d: -f1 | sort | uniq | sort -nr | grep -v "$ip"`
+
+count=0
+if [[ -n "$clients" ]]; then
+	count="$(netstat -tn 2> /dev/null | grep :$port | awk '{print $5}' | cut -d: -f1 | sort | uniq | sort -nr | grep -v "$ip" | tr ' ' '\n' | wc -l)"
+fi
+
+result="{\"clients\": "$count"}"
+
+# write in consul key/value
+nodeName=`curl -s $consulLocalAddr:$consulLocalPort/v1/agent/self | grep -Po '(?<=Name":")[\w\W]+(?=","ClientAddr)'`
+
+if [[ -n $consulToken ]]; then
+        save="$(consul kv put -http-addr="$consulServer":"$consulPort" -token="$consulToken" json/"$nodeName"/connections "$result")"
+else
+        save="$(consul kv put -http-addr="$consulServer":"$consulPort" json/"$nodeName"/connections "$result")"
+fi
+
+if [[ "$noEcho" == "1" ]]; then
+        exit 0
+fi
+
+if [[ "$json" == "1" ]]; then
+	echo $result
+	exit 0
+else
+	echo $save
+	echo ""
+fi
+
+echo -e "Your adapter ip: ${ip}\n"
+
+echo -n "Count of client: "
+if [ -z "$clients" ]; then
+	echo "0";
+	echo "Client ips: None"
+else
+	echo $clients | tr " " "\n" | wc -l
+	echo "Client ips:"
+	echo $clients | tr " " "\n"
+fi
+
+exit 0

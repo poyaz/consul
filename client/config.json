@@ -1,0 +1,14 @@
+{
+    "node_name": "client-102",
+    "server": false,
+    "client_addr": "127.0.0.1",
+    "datacenter": "local",
+    "data_dir": "/var/consul",
+    "ui_dir": "/home/consul/dist",
+    "encrypt": "r5tn6PzTzf5UT5OJsPhxrQ==",
+    "log_level": "info",
+    "enable_syslog": true,
+    "bind_addr": "192.168.167.102",
+    "start_join": ["192.168.167.2"],
+    "check_update_interval": "10s"
+}
